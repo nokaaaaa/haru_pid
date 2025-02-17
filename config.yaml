@@ -1,0 +1,13 @@
+pid_navigator:
+  ros__parameters:
+    linear_kp: 2.0
+    linear_ki: 0.0
+    linear_kd: 0.0
+    angular_kp: 0.01
+    angular_ki: 0.0
+    angular_kd: 0.0
+    max_linear_velocity: 3.0
+    max_angular_velocity: 0.1
+    arrival_threshold: 0.05
+    theta_threshold: 0.01
+    wait_time: 1
