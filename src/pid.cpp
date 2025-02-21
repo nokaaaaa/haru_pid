@@ -2,6 +2,7 @@
 #include <geometry_msgs/msg/pose2_d.hpp>
 #include <geometry_msgs/msg/twist.hpp>
 #include <std_msgs/msg/int32.hpp>
+#include <std_msgs/msg/bool.hpp>
 #include <fstream>
 #include <sstream>
 #include <vector>
@@ -44,7 +45,7 @@ private:
 
 class PIDNavigator : public rclcpp::Node {
 public:
-    PIDNavigator() : Node("pid_navigator"),
+    PIDNavigator() : Node("pid"),
                      current_x_(0), current_y_(0), current_theta_(0), target_index_(0),
                      is_first_target_(true),  // 初期化順を修正
                      linear_pid_(0.0, 0.0, 0.0),  // 初期化時にデフォルト値を設定
@@ -53,7 +54,7 @@ public:
         this->declare_parameter<double>("linear_kp", 1.0);
         this->declare_parameter<double>("linear_ki", 0.0);
         this->declare_parameter<double>("linear_kd", 0.0);
-        this->declare_parameter<double>("angular_kp", 1.0);
+        this->declare_parameter<double>("angular_kp", 0.05);
         this->declare_parameter<double>("angular_ki", 0.0);
         this->declare_parameter<double>("angular_kd", 0.0);
         this->declare_parameter<double>("max_linear_velocity", 0.5);
@@ -61,10 +62,10 @@ public:
         this->declare_parameter<double>("arrival_threshold", 0.1);
         this->declare_parameter<double>("theta_threshold", 0.1);
         this->declare_parameter<int>("wait_time", 1);
+        this->declare_parameter("field_color", "red");
+        this->declare_parameter("red_csv", "/home/yuki/ros2_ws/src/uni_tes/path/red.csv");
+        this->declare_parameter("blue_csv", "/home/yuki/ros2_ws/src/uni_tes/path/blue.csv");
 
-        // パラメータの読み込み
-        double linear_kp, linear_ki, linear_kd;
-        double angular_kp, angular_ki, angular_kd;
         this->get_parameter("linear_kp", linear_kp);
         this->get_parameter("linear_ki", linear_ki);
         this->get_parameter("linear_kd", linear_kd);
@@ -81,18 +82,30 @@ public:
         this->get_parameter("arrival_threshold", arrival_threshold_);
         this->get_parameter("theta_threshold", theta_threshold_);
         this->get_parameter("wait_time", wait_time_);
+        field_color_ = this->get_parameter("field_color").as_string();
+        red_csv = this->get_parameter("red_csv").as_string();
+        blue_csv = this->get_parameter("blue_csv").as_string();
+
+        if(field_color_ == "red") load_waypoints(red_csv);
+        else if(field_color_ == "blue") load_waypoints(blue_csv);  
+
+
+        RCLCPP_INFO(this->get_logger(), "field_color: %s", field_color_.c_str());
 
         pose_sub_ = this->create_subscription<geometry_msgs::msg::Pose2D>(
             "/pose", 10, std::bind(&PIDNavigator::pose_callback, this, std::placeholders::_1));
+        start_subscription_ = this->create_subscription<std_msgs::msg::Bool>(
+            "/start", 10, std::bind(&PIDNavigator::start_callback, this, std::placeholders::_1));
+
         cmd_vel_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/pid_cmd_vel", 10);
         state_publisher_ = this->create_publisher<std_msgs::msg::Int32>("/state", 10);
         timer_ = this->create_wall_timer(std::chrono::milliseconds(10), std::bind(&PIDNavigator::control_loop, this));
-        load_waypoints("/home/yuki/ros2_ws/src/pid_tes/waypoints.csv");
         std::this_thread::sleep_for(std::chrono::seconds(wait_time_));
     }
 
 private:
     rclcpp::Subscription<geometry_msgs::msg::Pose2D>::SharedPtr pose_sub_;
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr start_subscription_;
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub_;
     rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr state_publisher_;
     rclcpp::TimerBase::SharedPtr timer_;
@@ -102,14 +115,23 @@ private:
     bool is_first_target_;
     PIDController linear_pid_;
     PIDController angular_pid_;
+    // パラメータの読み込み
+    double linear_kp, linear_ki, linear_kd;
+    double angular_kp, angular_ki, angular_kd;
     double max_linear_vel_, max_angular_vel_;
     double arrival_threshold_, theta_threshold_;
     int wait_time_;
+    string field_color_,red_csv,blue_csv;
+    bool start_flag = false;
 
     void pose_callback(const geometry_msgs::msg::Pose2D::SharedPtr msg) {
         current_x_ = msg->x;
         current_y_ = msg->y;
         current_theta_ = msg->theta;
+    }
+
+    void start_callback(const std_msgs::msg::Bool::SharedPtr msg) {
+        start_flag = msg->data;
     }
 
     void control_loop() {
@@ -119,8 +141,11 @@ private:
             cmd.linear.y = 0.0;
             cmd.angular.z = 0.0;
             cmd_vel_pub_->publish(cmd);
+            cout<<"Reached the goal!"<<endl;
             return;
         }
+
+        if(!start_flag) return;
 
         const auto& target = waypoints_[target_index_];
         double dx = target.x - current_x_;
