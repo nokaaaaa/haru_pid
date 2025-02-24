@@ -99,6 +99,10 @@ public:
 
         cmd_vel_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/pid_cmd_vel", 10);
         state_publisher_ = this->create_publisher<std_msgs::msg::Int32>("/state", 10);
+        launcher1_publisher_ = this->create_publisher<std_msgs::msg::Bool>("/launcher1", 10);
+        kokuban_publisher_ = this->create_publisher<std_msgs::msg::Bool>("/kokuban", 10);
+        ball_publisher_ = this->create_publisher<std_msgs::msg::Bool>("/ball", 10);
+
         timer_ = this->create_wall_timer(std::chrono::milliseconds(10), std::bind(&PIDNavigator::control_loop, this));
         std::this_thread::sleep_for(std::chrono::seconds(wait_time_));
     }
@@ -108,6 +112,9 @@ private:
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr start_subscription_;
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub_;
     rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr state_publisher_;
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr launcher1_publisher_;
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr kokuban_publisher_;
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr ball_publisher_;
     rclcpp::TimerBase::SharedPtr timer_;
     std::vector<Waypoint> waypoints_;
     double current_x_, current_y_, current_theta_;
@@ -164,7 +171,28 @@ private:
         double v_y = -dx * sin(current_theta_) + dy * cos(current_theta_);
 
         if (distance < arrival_threshold_ && abs(angle_error) < theta_threshold_) {
+
+            //stateが2,4の終わりのときに射出を送る
+            if(target_index_ == 2 || target_index_ == 4){
+                auto shoot_cmd = std_msgs::msg::Bool();
+                shoot_cmd.data = true;
+                launcher1_publisher_->publish(shoot_cmd);
+            }
+            //stateが0の終わりに黒板回収
+            if(target_index_ == 0){
+                auto kokuban_cmd = std_msgs::msg::Bool();
+                kokuban_cmd.data = true;
+                kokuban_publisher_->publish(kokuban_cmd);
+            }
+            //stateが3の終わりにボール回収
+            if(target_index_ == 3){
+                auto ball_cmd = std_msgs::msg::Bool();
+                ball_cmd.data = true;
+                ball_publisher_->publish(ball_cmd);
+            }
+
             target_index_++;
+            cout<<"target_index: "<<target_index_<<endl;
             auto state_msg = std_msgs::msg::Int32();
             state_msg.data = target_index_;
             state_publisher_->publish(state_msg);
