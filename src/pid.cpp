@@ -172,8 +172,8 @@ private:
 
         if (distance < arrival_threshold_ && abs(angle_error) < theta_threshold_) {
 
-            //stateが2,4の終わりのときに射出を送る
-            if(target_index_ == 2 || target_index_ == 4){
+            //stateが2,5の終わりのときに射出を送る
+            if(target_index_ == 2 || target_index_ == 5){
                 auto shoot_cmd = std_msgs::msg::Bool();
                 shoot_cmd.data = true;
                 launcher1_publisher_->publish(shoot_cmd);
