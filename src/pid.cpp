@@ -61,7 +61,11 @@ public:
         this->declare_parameter<double>("max_angular_velocity", 1.0);
         this->declare_parameter<double>("arrival_threshold", 0.1);
         this->declare_parameter<double>("theta_threshold", 0.1);
-        this->declare_parameter<int>("wait_time", 1);
+        this->declare_parameter<int>("kokuban_t", 1000);
+        this->declare_parameter<int>("turn_t", 100);
+        this->declare_parameter<int>("launcher_1_t", 2000);
+        this->declare_parameter<int>("ball_t", 1000);
+        this->declare_parameter<int>("launcher_2_t", 100000);
         this->declare_parameter("field_color", "red");
         this->declare_parameter("red_csv", "/home/yuki/ros2_ws/src/uni_tes/path/red.csv");
         this->declare_parameter("blue_csv", "/home/yuki/ros2_ws/src/uni_tes/path/blue.csv");
@@ -81,10 +85,17 @@ public:
         this->get_parameter("max_angular_velocity", max_angular_vel_);
         this->get_parameter("arrival_threshold", arrival_threshold_);
         this->get_parameter("theta_threshold", theta_threshold_);
-        this->get_parameter("wait_time", wait_time_);
+        this->get_parameter("kokuban_t", t1);
+        this->get_parameter("turn_t", t2);
+        this->get_parameter("launcher_1_t", t3);
+        this->get_parameter("ball_t", t4);
+        this->get_parameter("launcher_2_t", t5);
+
         field_color_ = this->get_parameter("field_color").as_string();
         red_csv = this->get_parameter("red_csv").as_string();
         blue_csv = this->get_parameter("blue_csv").as_string();
+
+        wait_time = {t1, t2, t3, t4, t5};
 
         if(field_color_ == "red") load_waypoints(red_csv);
         else if(field_color_ == "blue") load_waypoints(blue_csv);  
@@ -102,9 +113,9 @@ public:
         launcher1_publisher_ = this->create_publisher<std_msgs::msg::Bool>("/launcher1", 10);
         kokuban_publisher_ = this->create_publisher<std_msgs::msg::Bool>("/kokuban", 10);
         ball_publisher_ = this->create_publisher<std_msgs::msg::Bool>("/ball", 10);
-
         timer_ = this->create_wall_timer(std::chrono::milliseconds(10), std::bind(&PIDNavigator::control_loop, this));
-        std::this_thread::sleep_for(std::chrono::seconds(wait_time_));
+        
+
     }
 
 private:
@@ -127,9 +138,11 @@ private:
     double angular_kp, angular_ki, angular_kd;
     double max_linear_vel_, max_angular_vel_;
     double arrival_threshold_, theta_threshold_;
-    int wait_time_;
+    int t1,t2,t3,t4,t5;
+    vector<int> wait_time;
     string field_color_,red_csv,blue_csv;
     bool start_flag = false;
+
 
     void pose_callback(const geometry_msgs::msg::Pose2D::SharedPtr msg) {
         current_x_ = msg->x;
@@ -206,7 +219,7 @@ private:
             stop_cmd.angular.z = 0.0;
             cmd_vel_pub_->publish(stop_cmd);
 
-            this_thread::sleep_for(chrono::seconds(wait_time_));
+            this_thread::sleep_for(std::chrono::milliseconds(wait_time[target_index_-1]));
         }
 
         auto cmd = geometry_msgs::msg::Twist();
