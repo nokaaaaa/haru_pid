@@ -59,6 +59,7 @@ public:
         this->declare_parameter<double>("angular_kd", 0.0);
         this->declare_parameter<double>("max_linear_velocity", 0.5);
         this->declare_parameter<double>("max_angular_velocity", 1.0);
+        this->declare_parameter<double>("max_accel", 1.0);
         this->declare_parameter<double>("arrival_threshold", 0.1);
         this->declare_parameter<double>("theta_threshold", 0.1);
         this->declare_parameter<int>("kokuban_t", 1000);
@@ -68,7 +69,10 @@ public:
         this->declare_parameter<int>("launcher_2_t", 100000);
         this->declare_parameter("field_color", "red");
         this->declare_parameter("red_csv", "/home/yuki/ros2_ws/src/uni_tes/path/red.csv");
-        this->declare_parameter("blue_csv", "/home/yuki/ros2_ws/src/uni_tes/path/blue.csv");
+        this->declare_parameter("blue_csv", "/home/yuki/ros2_ws/src/uni_tes05050505/path/blue.csv");
+        this->declare_parameter<bool>("utikiri", true);
+        this->declare_parameter<double>("stop_threshold", 0.05);
+
 
         this->get_parameter("linear_kp", linear_kp);
         this->get_parameter("linear_ki", linear_ki);
@@ -83,6 +87,7 @@ public:
 
         this->get_parameter("max_linear_velocity", max_linear_vel_);
         this->get_parameter("max_angular_velocity", max_angular_vel_);
+        this->get_parameter("max_accel", max_accel_);
         this->get_parameter("arrival_threshold", arrival_threshold_);
         this->get_parameter("theta_threshold", theta_threshold_);
         this->get_parameter("kokuban_t", t1);
@@ -90,6 +95,10 @@ public:
         this->get_parameter("launcher_1_t", t3);
         this->get_parameter("ball_t", t4);
         this->get_parameter("launcher_2_t", t5);
+        this->get_parameter("utikiri", utikiri_);
+        this->get_parameter("stop_threshold", stop_threshold_);
+
+        cout<<"max_accel: "<<max_accel_<<endl;
 
         field_color_ = this->get_parameter("field_color").as_string();
         red_csv = this->get_parameter("red_csv").as_string();
@@ -113,8 +122,7 @@ public:
         launcher1_publisher_ = this->create_publisher<std_msgs::msg::Bool>("/launcher1", 10);
         kokuban_publisher_ = this->create_publisher<std_msgs::msg::Bool>("/kokuban", 10);
         ball_publisher_ = this->create_publisher<std_msgs::msg::Bool>("/ball", 10);
-        timer_ = this->create_wall_timer(std::chrono::milliseconds(10), std::bind(&PIDNavigator::control_loop, this));
-        
+        timer_ = this->create_wall_timer(std::chrono::milliseconds(dt), std::bind(&PIDNavigator::control_loop, this));
 
     }
 
@@ -136,12 +144,19 @@ private:
     // パラメータの読み込み
     double linear_kp, linear_ki, linear_kd;
     double angular_kp, angular_ki, angular_kd;
-    double max_linear_vel_, max_angular_vel_;
+    double max_linear_vel_, max_angular_vel_, max_accel_;
     double arrival_threshold_, theta_threshold_;
+    bool utikiri_;
+    double stop_threshold_;
+
     int t1,t2,t3,t4,t5;
     vector<int> wait_time;
     string field_color_,red_csv,blue_csv;
     bool start_flag = false;
+    int dt = 10; //(ms)
+    bool time_flag =true;
+    bool stop =false;
+    chrono::steady_clock::time_point start_time; // クラスメンバとして宣言
 
 
     void pose_callback(const geometry_msgs::msg::Pose2D::SharedPtr msg) {
@@ -167,26 +182,51 @@ private:
 
         if(!start_flag) return;
 
+        if(time_flag){
+            start_time = chrono::steady_clock::now();
+            time_flag = false;
+        }
+
         const auto& target = waypoints_[target_index_];
         double dx = target.x - current_x_;
         double dy = target.y - current_y_;
         double distance = sqrt(dx * dx + dy * dy);
-        double angle_error = target.theta - current_theta_;
+        double angle_error = M_PI*target.theta/180 - current_theta_;
 
         double linear_vel = linear_pid_.compute(distance);
         double angular_vel = angular_pid_.compute(angle_error);
 
+        auto current_time = chrono::steady_clock::now();
+        auto elapsed_time = std::chrono::duration_cast<std::chrono::seconds>(current_time - start_time).count();
         // 速度制限
-        linear_vel = max(min(linear_vel, max_linear_vel_), -max_linear_vel_);
-        angular_vel = max(min(angular_vel, max_angular_vel_), -max_angular_vel_);
+        linear_vel = std::min({linear_vel, max_linear_vel_, max_accel_ * elapsed_time});
+        angular_vel = std::max(std::min(angular_vel, max_angular_vel_), -max_angular_vel_);
 
         double v_x = dx * cos(current_theta_) + dy * sin(current_theta_);
         double v_y = -dx * sin(current_theta_) + dy * cos(current_theta_);
 
-        if (distance < arrival_threshold_ && abs(angle_error) < theta_threshold_) {
+        if(utikiri_ == false)
+        {
+             if (distance < arrival_threshold_ && abs(angle_error) < theta_threshold_) stop = true;
+        }
+        else
+        //target=0の終わりでは |dy|が閾値以下で停止
+        //target=1の終わりでは |dx|が閾値以下で停止
+        //target=2の終わりでは そのまま
+        //target=3の終わりでは |dy|が閾値以下で停止
+        //target=4の終わりでは そのまま
+        {
+            if(target_index_==0 && abs(dy)<stop_threshold_) stop = true;
+            if(target_index_==1 && abs(dx)<stop_threshold_) stop = true;
+            if(target_index_==2 && distance < arrival_threshold_ && abs(angle_error) < theta_threshold_) stop =true;
+            if(target_index_==3 && abs(dy)<stop_threshold_) stop = true;
+            if(target_index_==4 && distance < arrival_threshold_ && abs(angle_error) < theta_threshold_)stop =true;
+        }
 
-            //stateが2,5の終わりのときに射出を送る
-            if(target_index_ == 2 || target_index_ == 5){
+        if (stop) {
+
+            //stateが2,4の終わりのときに射出を送る
+            if(target_index_ == 2 || target_index_ == 4){
                 auto shoot_cmd = std_msgs::msg::Bool();
                 shoot_cmd.data = true;
                 launcher1_publisher_->publish(shoot_cmd);
@@ -220,6 +260,8 @@ private:
             cmd_vel_pub_->publish(stop_cmd);
 
             this_thread::sleep_for(std::chrono::milliseconds(wait_time[target_index_-1]));
+            time_flag = true;
+            stop = false;
         }
 
         auto cmd = geometry_msgs::msg::Twist();
